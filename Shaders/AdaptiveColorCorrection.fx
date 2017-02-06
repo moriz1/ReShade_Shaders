@@ -25,8 +25,17 @@ uniform bool DebugLuma <
 
 uniform bool DebugLumaOutput <
     ui_label = "Show Luma Output";
+	ui_tooltip = "Black/White blurry mode!";
+> = false;
+
+uniform bool DebugLumaOutputHQ <
+    ui_label = "Show Luma Output at Native Resolution";
 	ui_tooltip = "Black/White mode!";
 > = false;
+
+uniform bool EnableHighlightsInDarkScenes <
+    ui_label = "Add highlights to bright objects when in dark scenes";
+> = true;
 
 uniform float LumaChangeSpeed <
 	ui_label = "Adaptation Speed";
@@ -48,10 +57,18 @@ uniform float LumaLow <
 	ui_min = 0.0; ui_max = 1.0;
 > = 0.25;
 
+uniform float HighlightThreshold <
+	ui_label = "Low Luma Highlight Start";
+	ui_tooltip = "If average luma falls below this limit, start adding highlights\nSet between Min and Max Threshold";
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 1.0;
+> = 0.4;
+
 #include "ReShade.fxh"
 
 texture LumaInputTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8; MipLevels = 6; };
 sampler LumaInputSampler { Texture = LumaInputTex; MipLODBias = 6.0f; };
+sampler LumaInputSamplerHQ { Texture = LumaInputTex; };
 
 texture LumaTex { Width = 1; Height = 1; Format = R8; };
 sampler LumaSampler { Texture = LumaTex; };
@@ -87,19 +104,14 @@ float SampleLuma(float4 position : SV_Position, float2 texcoord : TexCoord) : SV
 float LumaInput(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
 	float3 color = tex2D(ReShade::BackBuffer, texcoord).xyz;
 	
-	//gonna cheat and store luma info in the alpha channel
 	return pow((color.r*2 + color.b + color.g*3) / 6, 1/2.2);
 }
 
-float4 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
-	float4 color = tex2D(ReShade::BackBuffer, texcoord.xy);
+float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
+	float3 color = tex2D(ReShade::BackBuffer, texcoord.xy).rgb;
+
 	float2 texelsize = 1.0 / fLUT_TileSizeXY;
 	texelsize.x /= fLUT_TileAmount;
-
-	if (DebugLumaOutput) {
-		float temp = tex2D(LumaInputSampler, texcoord.xy).x;
-		return float4(temp, temp, temp, temp);
-	}
 
 	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
 	float lerpfact = frac(lutcoord.z);
@@ -111,41 +123,13 @@ float4 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 
 	float lumaVal = tex2D(LumaSampler, float2(0.5, 0.5)).x;
 
-	if (DebugLuma) {
-		if (texcoord.y <= 0.01 && texcoord.x <= 0.01) {
-			return lumaVal;
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.01 && texcoord.x <= 0.02) {
-			if (lumaVal > LumaHigh) {
-				return float4(1.0, 1.0, 1.0, 1.0);
-			}
-			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
-			}
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.02 && texcoord.x <= 0.03) {
-			if (lumaVal <= LumaHigh && lumaVal >= LumaLow) {
-				return float4(1.0, 1.0, 1.0, 1.0);
-			}
-			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
-			}
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.03 && texcoord.x <= 0.04) {
-			if (lumaVal < LumaLow) {
-				return float4(1.0, 1.0, 1.0, 1.0);
-			}
-			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
-			}
-		}
-	}
-
 	float3 color1 = 0.0;
 	float3 color2 = 0.0;
 
 	color1.xyz = lutcolor.xyz;
 	color2.xyz = lutcolor2.xyz;
+
+	float range = (lumaVal - LumaLow)/(LumaHigh - LumaLow);
 
 	if (lumaVal > LumaHigh) {
 		color.xyz = color1.xyz;
@@ -154,10 +138,73 @@ float4 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 		color.xyz = color2.xyz;
 	}
 	else {
-		color.xyz = (color1.xyz * (lumaVal - LumaLow)/(LumaHigh - LumaLow)) + (color2.xyz * (1 - ((lumaVal - LumaLow)/(LumaHigh - LumaLow))));
+		color.xyz = lerp(color2.xyz, color1.xyz, range);
 	}
 
-	color.w = 1.0;
+	return color;
+}
+
+float3 ApplyHighlights(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
+	float3 color = tex2D(ReShade::BackBuffer, texcoord.xy).rgb;
+	float highlightLuma = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
+	float averageLuma = tex2D(LumaSampler, float2(0.5, 0.5));
+
+	if (DebugLumaOutputHQ) {
+		float temp = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
+		return float4(temp, temp, temp, temp);
+	}
+	else if (DebugLumaOutput) {
+		float temp = tex2D(LumaInputSampler, texcoord.xy).x;
+		return float4(temp, temp, temp, temp);
+	}
+
+	float2 texelsize = 1.0 / fLUT_TileSizeXY;
+	texelsize.x /= fLUT_TileAmount;
+
+	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
+	float lerpfact = frac(lutcoord.z);
+
+	if (DebugLuma) {
+		if (texcoord.y <= 0.01 && texcoord.x <= 0.01) {
+			return averageLuma;
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.01 && texcoord.x <= 0.02) {
+			if (averageLuma > LumaHigh) {
+				return float4(1.0, 1.0, 1.0, 1.0);
+			}
+			else {
+				return float4(0.0, 0.0, 0.0, 1.0);
+			}
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.02 && texcoord.x <= 0.03) {
+			if (averageLuma <= LumaHigh && averageLuma >= LumaLow) {
+				return float4(1.0, 1.0, 1.0, 1.0);
+			}
+			else {
+				return float4(0.0, 0.0, 0.0, 1.0);
+			}
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.03 && texcoord.x <= 0.04) {
+			if (averageLuma < LumaLow) {
+				return float4(1.0, 1.0, 1.0, 1.0);
+			}
+			else {
+				return float4(0.0, 0.0, 0.0, 1.0);
+			}
+		}
+	}
+
+	lutcoord.x += (lutcoord.z-lerpfact)*texelsize.y;
+	
+	float3 highlightColor = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
+
+	if (EnableHighlightsInDarkScenes) {
+		if (highlightLuma > averageLuma && highlightLuma > HighlightThreshold) {
+			float range = (highlightLuma - HighlightThreshold)/(1 - HighlightThreshold);
+
+			color.xyz = lerp(color.xyz, highlightColor.xyz, range);
+		}
+	}
 
 	return color;
 }
@@ -181,6 +228,10 @@ technique AdaptiveColorCorrection {
 	pass Apply_LUT {
 		VertexShader = PostProcessVS;
 		PixelShader = ApplyLUT;
+	}
+	pass Apply_Highlights {
+		VertexShader = PostProcessVS;
+		PixelShader = ApplyHighlights;
 	}
 	pass StoreLumaLF {
 		VertexShader = PostProcessVS;
