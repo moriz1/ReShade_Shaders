@@ -34,8 +34,14 @@ uniform bool DebugLumaOutputHQ <
 > = false;
 
 uniform bool EnableHighlightsInDarkScenes <
-    ui_label = "Add highlights to bright objects when in dark scenes";
+	ui_label = "Enable Highlights";
+    ui_tooltip = "Add highlights to bright objects when in dark scenes";
 > = true;
+
+uniform bool DebugHighlights <
+    ui_label = "Show Debug Highlights";
+	ui_tooltip = "If any highlights are in the frame, this colours them magenta";
+> = false;
 
 uniform float LumaChangeSpeed <
 	ui_label = "Adaptation Speed";
@@ -48,21 +54,28 @@ uniform float LumaHigh <
 	ui_tooltip = "Luma above this level uses full Daytime LUT\nSet higher than Min Threshold";
 	ui_type = "drag";
 	ui_min = 0.0; ui_max = 1.0;
-> = 0.4;
+> = 0.75;
 
 uniform float LumaLow <
 	ui_label = "Luma Min Threshold";
 	ui_tooltip = "Luma below this level uses full NightTime LUT\nSet lower than Max Threshold";
 	ui_type = "drag";
 	ui_min = 0.0; ui_max = 1.0;
-> = 0.25;
+> = 0.2;
 
-uniform float HighlightThreshold <
+uniform float AmbientHighlightThreshold <
 	ui_label = "Low Luma Highlight Start";
-	ui_tooltip = "If average luma falls below this limit, start adding highlights\nSet between Min and Max Threshold";
+	ui_tooltip = "If average luma falls below this limit, start adding highlights\nSimulates HDR look in low light";
 	ui_type = "drag";
 	ui_min = 0.0; ui_max = 1.0;
-> = 0.4;
+> = 0.5;
+
+uniform float HighlightThreshold <
+	ui_label = "Minimum Luma For Highlights";
+	ui_tooltip = "Any luma value above this will have highlights\nSimulates HDR look in low light";
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 1.0;
+> = 0.5;
 
 #include "ReShade.fxh"
 
@@ -147,15 +160,15 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 float3 ApplyHighlights(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
 	float3 color = tex2D(ReShade::BackBuffer, texcoord.xy).rgb;
 	float highlightLuma = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
-	float averageLuma = tex2D(LumaSampler, float2(0.5, 0.5));
+	float averageLuma = tex2D(LumaSampler, float2(0.5, 0.5)).x;
 
 	if (DebugLumaOutputHQ) {
 		float temp = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
-		return float4(temp, temp, temp, temp);
+		return float3(temp, temp, temp);
 	}
 	else if (DebugLumaOutput) {
 		float temp = tex2D(LumaInputSampler, texcoord.xy).x;
-		return float4(temp, temp, temp, temp);
+		return float3(temp, temp, temp);
 	}
 
 	float2 texelsize = 1.0 / fLUT_TileSizeXY;
@@ -170,26 +183,26 @@ float3 ApplyHighlights(float4 position : SV_Position, float2 texcoord : TexCoord
 		}
 		if (texcoord.y <= 0.01 && texcoord.x > 0.01 && texcoord.x <= 0.02) {
 			if (averageLuma > LumaHigh) {
-				return float4(1.0, 1.0, 1.0, 1.0);
+				return float3(1.0, 1.0, 1.0);
 			}
 			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
+				return float3(0.0, 0.0, 0.0);
 			}
 		}
 		if (texcoord.y <= 0.01 && texcoord.x > 0.02 && texcoord.x <= 0.03) {
 			if (averageLuma <= LumaHigh && averageLuma >= LumaLow) {
-				return float4(1.0, 1.0, 1.0, 1.0);
+				return float3(1.0, 1.0, 1.0);
 			}
 			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
+				return float3(0.0, 0.0, 0.0);
 			}
 		}
 		if (texcoord.y <= 0.01 && texcoord.x > 0.03 && texcoord.x <= 0.04) {
 			if (averageLuma < LumaLow) {
-				return float4(1.0, 1.0, 1.0, 1.0);
+				return float3(1.0, 1.0, 1.0);
 			}
 			else {
-				return float4(0.0, 0.0, 0.0, 1.0);
+				return float3(0.0, 0.0, 0.0);
 			}
 		}
 	}
@@ -199,8 +212,13 @@ float3 ApplyHighlights(float4 position : SV_Position, float2 texcoord : TexCoord
 	float3 highlightColor = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
 
 	if (EnableHighlightsInDarkScenes) {
-		if (highlightLuma > averageLuma && highlightLuma > HighlightThreshold) {
+		//if (highlightLuma > averageLuma && highlightLuma > AmbientHighlightThreshold) {
+		if (averageLuma < AmbientHighlightThreshold && highlightLuma > HighlightThreshold) {
 			float range = (highlightLuma - HighlightThreshold)/(1 - HighlightThreshold);
+
+			if (DebugHighlights) {
+				color.xyz = lerp(color.xyz, float3(1.0, 0.0, 1.0), range);
+			}
 
 			color.xyz = lerp(color.xyz, highlightColor.xyz, range);
 		}
