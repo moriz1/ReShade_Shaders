@@ -77,6 +77,13 @@ uniform float HighlightThreshold <
 	ui_min = 0.0; ui_max = 1.0;
 > = 0.5;
 
+uniform float HighlightMaxThreshold <
+	ui_label = "Max Luma For Highlights";
+	ui_tooltip = "Highlights reach maximum strength at this luma value\nSimulates HDR look in low light";
+	ui_type = "drag";
+	ui_min = 0.0; ui_max = 1.0;
+> = 0.8;
+
 #include "ReShade.fxh"
 
 texture LumaInputTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8; MipLevels = 6; };
@@ -122,6 +129,15 @@ float LumaInput(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 
 float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
 	float3 color = tex2D(ReShade::BackBuffer, texcoord.xy).rgb;
+	float lumaVal = tex2D(LumaSampler, float2(0.5, 0.5)).x;
+	float highlightLuma = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
+
+	if (DebugLumaOutputHQ) {
+		return highlightLuma;
+	}
+	else if (DebugLumaOutput) {
+		return lumaVal;
+	}
 
 	float2 texelsize = 1.0 / fLUT_TileSizeXY;
 	texelsize.x /= fLUT_TileAmount;
@@ -129,18 +145,40 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
 	float lerpfact = frac(lutcoord.z);
 
+	if (DebugLuma) {
+		if (texcoord.y <= 0.01 && texcoord.x <= 0.01) {
+			return lumaVal;
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.01 && texcoord.x <= 0.02) {
+			if (lumaVal > LumaHigh) {
+				return float3(1.0, 1.0, 1.0);
+			}
+			else {
+				return float3(0.0, 0.0, 0.0);
+			}
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.02 && texcoord.x <= 0.03) {
+			if (lumaVal <= LumaHigh && lumaVal >= LumaLow) {
+				return float3(1.0, 1.0, 1.0);
+			}
+			else {
+				return float3(0.0, 0.0, 0.0);
+			}
+		}
+		if (texcoord.y <= 0.01 && texcoord.x > 0.03 && texcoord.x <= 0.04) {
+			if (lumaVal < LumaLow) {
+				return float3(1.0, 1.0, 1.0);
+			}
+			else {
+				return float3(0.0, 0.0, 0.0);
+			}
+		}
+	}
+
 	lutcoord.x += (lutcoord.z-lerpfact)*texelsize.y;
 	
-	float3 lutcolor = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
-	float3 lutcolor2 =lerp(tex2D(SamplerLUTNight, lutcoord.xy).xyz, tex2D(SamplerLUTNight, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);	
-
-	float lumaVal = tex2D(LumaSampler, float2(0.5, 0.5)).x;
-
-	float3 color1 = 0.0;
-	float3 color2 = 0.0;
-
-	color1.xyz = lutcolor.xyz;
-	color2.xyz = lutcolor2.xyz;
+	float3 color1 = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
+	float3 color2 =lerp(tex2D(SamplerLUTNight, lutcoord.xy).xyz, tex2D(SamplerLUTNight, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);	
 
 	float range = (lumaVal - LumaLow)/(LumaHigh - LumaLow);
 
@@ -154,70 +192,24 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 		color.xyz = lerp(color2.xyz, color1.xyz, range);
 	}
 
-	return color;
-}
+	float3 lutcoord2 = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
+	float lerpfact2 = frac(lutcoord2.z);
 
-float3 ApplyHighlights(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_Target {
-	float3 color = tex2D(ReShade::BackBuffer, texcoord.xy).rgb;
-	float highlightLuma = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
-	float averageLuma = tex2D(LumaSampler, float2(0.5, 0.5)).x;
-
-	if (DebugLumaOutputHQ) {
-		float temp = tex2D(LumaInputSamplerHQ, texcoord.xy).x;
-		return float3(temp, temp, temp);
-	}
-	else if (DebugLumaOutput) {
-		float temp = tex2D(LumaInputSampler, texcoord.xy).x;
-		return float3(temp, temp, temp);
-	}
-
-	float2 texelsize = 1.0 / fLUT_TileSizeXY;
-	texelsize.x /= fLUT_TileAmount;
-
-	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
-	float lerpfact = frac(lutcoord.z);
-
-	if (DebugLuma) {
-		if (texcoord.y <= 0.01 && texcoord.x <= 0.01) {
-			return averageLuma;
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.01 && texcoord.x <= 0.02) {
-			if (averageLuma > LumaHigh) {
-				return float3(1.0, 1.0, 1.0);
-			}
-			else {
-				return float3(0.0, 0.0, 0.0);
-			}
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.02 && texcoord.x <= 0.03) {
-			if (averageLuma <= LumaHigh && averageLuma >= LumaLow) {
-				return float3(1.0, 1.0, 1.0);
-			}
-			else {
-				return float3(0.0, 0.0, 0.0);
-			}
-		}
-		if (texcoord.y <= 0.01 && texcoord.x > 0.03 && texcoord.x <= 0.04) {
-			if (averageLuma < LumaLow) {
-				return float3(1.0, 1.0, 1.0);
-			}
-			else {
-				return float3(0.0, 0.0, 0.0);
-			}
-		}
-	}
-
-	lutcoord.x += (lutcoord.z-lerpfact)*texelsize.y;
+	lutcoord2.x += (lutcoord2.z-lerpfact2)*texelsize.y;
 	
-	float3 highlightColor = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
+	float3 highlightColor = lerp(tex2D(SamplerLUTDay, lutcoord2.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord2.x+texelsize.y,lutcoord2.y)).xyz,lerpfact2);
 
+	//apply highlights
 	if (EnableHighlightsInDarkScenes) {
-		//if (highlightLuma > averageLuma && highlightLuma > AmbientHighlightThreshold) {
-		if (averageLuma < AmbientHighlightThreshold && highlightLuma > HighlightThreshold) {
-			float range = (highlightLuma - HighlightThreshold)/(1 - HighlightThreshold);
+		if (lumaVal < AmbientHighlightThreshold && highlightLuma > HighlightThreshold) {
+			float range = saturate((highlightLuma - HighlightThreshold)/(HighlightMaxThreshold - HighlightThreshold));
 
 			if (DebugHighlights) {
 				color.xyz = lerp(color.xyz, float3(1.0, 0.0, 1.0), range);
+				
+				if (range >= 1.0) {
+					color.xyz = float3(1.0, 0.0, 0.0);
+				}
 			}
 
 			color.xyz = lerp(color.xyz, highlightColor.xyz, range);
@@ -246,10 +238,6 @@ technique AdaptiveColorCorrection {
 	pass Apply_LUT {
 		VertexShader = PostProcessVS;
 		PixelShader = ApplyLUT;
-	}
-	pass Apply_Highlights {
-		VertexShader = PostProcessVS;
-		PixelShader = ApplyHighlights;
 	}
 	pass StoreLumaLF {
 		VertexShader = PostProcessVS;
