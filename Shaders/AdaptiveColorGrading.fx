@@ -1,5 +1,5 @@
 /**
- * Adaptive Color Correction
+ * Adaptive Color Grading
  * Runs two LUTs simultaneously, smoothly lerping between them based on luma.
  * By moriz1
  * Original LUT shader by Marty McFly
@@ -178,7 +178,7 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 	lutcoord.x += (lutcoord.z-lerpfact)*texelsize.y;
 	
 	float3 color1 = lerp(tex2D(SamplerLUTDay, lutcoord.xy).xyz, tex2D(SamplerLUTDay, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);
-	float3 color2 =lerp(tex2D(SamplerLUTNight, lutcoord.xy).xyz, tex2D(SamplerLUTNight, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);	
+	float3 color2 = lerp(tex2D(SamplerLUTNight, lutcoord.xy).xyz, tex2D(SamplerLUTNight, float2(lutcoord.x+texelsize.y,lutcoord.y)).xyz,lerpfact);	
 
 	float range = (lumaVal - LumaLow)/(LumaHigh - LumaLow);
 
@@ -223,7 +223,7 @@ float SampleLumaLF(float4 position : SV_Position, float2 texcoord: TexCoord) : S
 	return tex2D(LumaSampler, float2(0.5, 0.5)).x;
 }
 
-technique AdaptiveColorCorrection {
+technique AdaptiveColorGrading {
 	pass Input {
 		VertexShader = PostProcessVS;
 		PixelShader = LumaInput;
