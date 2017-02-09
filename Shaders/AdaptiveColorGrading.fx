@@ -202,7 +202,8 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 	//apply highlights
 	if (EnableHighlightsInDarkScenes) {
 		if (lumaVal < AmbientHighlightThreshold && highlightLuma > HighlightThreshold) {
-			float range = saturate((highlightLuma - HighlightThreshold)/(HighlightMaxThreshold - HighlightThreshold));
+			float range = saturate((highlightLuma - HighlightThreshold)/(HighlightMaxThreshold - HighlightThreshold)) * 
+							saturate((AmbientHighlightThreshold - lumaVal)/(0.1));
 
 			if (DebugHighlights) {
 				color.xyz = lerp(color.xyz, float3(1.0, 0.0, 1.0), range);
