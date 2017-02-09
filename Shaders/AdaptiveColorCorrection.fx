@@ -139,12 +139,6 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 		return lumaVal;
 	}
 
-	float2 texelsize = 1.0 / fLUT_TileSizeXY;
-	texelsize.x /= fLUT_TileAmount;
-
-	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
-	float lerpfact = frac(lutcoord.z);
-
 	if (DebugLuma) {
 		if (texcoord.y <= 0.01 && texcoord.x <= 0.01) {
 			return lumaVal;
@@ -174,6 +168,12 @@ float3 ApplyLUT(float4 position : SV_Position, float2 texcoord : TexCoord) : SV_
 			}
 		}
 	}
+
+	float2 texelsize = 1.0 / fLUT_TileSizeXY;
+	texelsize.x /= fLUT_TileAmount;
+
+	float3 lutcoord = float3((color.xy*fLUT_TileSizeXY-color.xy+0.5)*texelsize.xy,color.z*fLUT_TileSizeXY-color.z);
+	float lerpfact = frac(lutcoord.z);
 
 	lutcoord.x += (lutcoord.z-lerpfact)*texelsize.y;
 	
